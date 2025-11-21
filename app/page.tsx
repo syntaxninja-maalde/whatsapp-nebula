@@ -1,6 +1,7 @@
+
 "use client";
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import Sidebar from '../components/Sidebar';
 import ChatWindow from '../components/ChatWindow';
 import ConfigModal from '../components/ConfigModal';
@@ -9,28 +10,9 @@ import TemplateDashboard from '../components/TemplateDashboard';
 import LoginScreen from '../components/LoginScreen';
 import { Contact, Message, MessageType, MetaCredentials, WebhookLog, CustomTemplate } from '../types';
 import { sendMetaTextMessage, sendMetaTemplateMessage, uploadMediaToMeta, sendMetaMediaMessage } from '../services/metaService';
-import { generateCustomerReply } from '../services/geminiService';
-import { Settings, Globe, MessageSquare, LayoutTemplate, LogOut } from 'lucide-react';
+import { Settings, Globe, MessageSquare, LayoutTemplate, LogOut, Wifi, WifiOff } from 'lucide-react';
 
-const INITIAL_CONTACTS: Contact[] = [
-  {
-    id: 'demo-user',
-    name: 'Demo Customer',
-    unreadCount: 1,
-    lastMessage: 'Hello! I am interested in your services.',
-    lastMessageTime: Date.now() - 3600000,
-    messages: [
-       {
-         id: '1',
-         text: 'Hello! I am interested in your services.',
-         timestamp: Date.now() - 3600000,
-         direction: 'incoming',
-         status: 'read',
-         type: MessageType.TEXT
-       }
-    ]
-  }
-];
+const WS_URL = 'wss://webhooks.maalde.co.in/ws';
 
 const Page: React.FC = () => {
   // Authentication State
@@ -39,28 +21,186 @@ const Page: React.FC = () => {
   // View State
   const [currentView, setCurrentView] = useState<'chat' | 'templates'>('chat');
 
-  const [contacts, setContacts] = useState<Contact[]>(INITIAL_CONTACTS);
+  // Data State
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [activeContactId, setActiveContactId] = useState<string | null>(null);
   const [creds, setCreds] = useState<MetaCredentials | null>(null);
+  
+  // UI State
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [isTemplateOpen, setIsTemplateOpen] = useState(false);
   const [isSending, setIsSending] = useState(false);
-  const [webhookLogs, setWebhookLogs] = useState<WebhookLog[]>([]);
+  const [isConnected, setIsConnected] = useState(false); // WebSocket status
   
   // Custom Template State (Local cache for Chat View)
   const [customTemplates, setCustomTemplates] = useState<CustomTemplate[]>([]);
 
+  const wsRef = useRef<WebSocket | null>(null);
   const activeContact = contacts.find(c => c.id === activeContactId) || null;
 
-  const addWebhookLog = (event: 'messages' | 'status' | 'system', details: string, type: 'incoming' | 'outgoing' | 'system' = 'system') => {
-      const newLog: WebhookLog = {
-          id: Date.now().toString() + Math.random(),
-          timestamp: Date.now(),
-          event,
-          details,
-          type
-      };
-      setWebhookLogs(prev => [newLog, ...prev]);
+  // 1. Load Data from LocalStorage on Mount
+  useEffect(() => {
+    const savedContacts = localStorage.getItem('wb_contacts');
+    const savedCreds = localStorage.getItem('wb_creds');
+    const savedTemplates = localStorage.getItem('wb_templates');
+
+    if (savedContacts) {
+        try {
+            setContacts(JSON.parse(savedContacts));
+        } catch (e) { console.error("Failed to load contacts", e); }
+    }
+    if (savedCreds) {
+        try {
+            setCreds(JSON.parse(savedCreds));
+        } catch (e) { console.error("Failed to load creds", e); }
+    }
+    if (savedTemplates) {
+        try {
+             setCustomTemplates(JSON.parse(savedTemplates));
+        } catch (e) { console.error("Failed to load templates", e); }
+    }
+  }, []);
+
+  // 2. Save Data to LocalStorage on Change
+  useEffect(() => {
+    localStorage.setItem('wb_contacts', JSON.stringify(contacts));
+  }, [contacts]);
+
+  useEffect(() => {
+    if (creds) localStorage.setItem('wb_creds', JSON.stringify(creds));
+  }, [creds]);
+  
+  useEffect(() => {
+    localStorage.setItem('wb_templates', JSON.stringify(customTemplates));
+  }, [customTemplates]);
+
+
+  // 3. WebSocket Connection Logic
+  useEffect(() => {
+    if (!isAuthenticated) return;
+
+    const connectWs = () => {
+        console.log("Connecting to WebSocket...");
+        const ws = new WebSocket(WS_URL);
+        
+        ws.onopen = () => {
+            console.log("WebSocket Connected");
+            setIsConnected(true);
+        };
+
+        ws.onclose = () => {
+            console.log("WebSocket Disconnected");
+            setIsConnected(false);
+            // Reconnect after 3s
+            setTimeout(connectWs, 3000);
+        };
+
+        ws.onerror = (err) => {
+            console.error("WebSocket Error:", err);
+            ws.close();
+        };
+
+        ws.onmessage = (event) => {
+            try {
+                const payload = JSON.parse(event.data);
+                handleWebSocketMessage(payload);
+            } catch (e) {
+                console.error("Failed to parse WS message:", e);
+            }
+        };
+
+        wsRef.current = ws;
+    };
+
+    connectWs();
+
+    return () => {
+        if (wsRef.current) {
+            wsRef.current.close();
+        }
+    };
+  }, [isAuthenticated]);
+
+  // 4. Handle Incoming WS Messages
+  const handleWebSocketMessage = (payload: any) => {
+      const { type, data } = payload;
+
+      if (type === 'message') {
+          // Incoming Message
+          const contactId = data.from;
+          const timestamp = parseInt(data.timestamp) * 1000 || Date.now(); // Ensure ms
+          
+          let messageType = MessageType.TEXT;
+          let text = data.text || '';
+          let mediaUrl = undefined;
+
+          // Normalize Media Types from your backend payload structure
+          if (data.media) {
+              // Assuming your backend sends normalized media object
+              const mime = data.media.mime_type || '';
+              if (mime.startsWith('image')) messageType = MessageType.IMAGE;
+              else if (mime.startsWith('video')) messageType = MessageType.VIDEO;
+              else if (mime.startsWith('audio')) messageType = MessageType.AUDIO;
+              
+              // Note: Meta requires downloading media with token. 
+              // For now, we might not have the direct URL unless your backend proxied it.
+              // If ID is provided, we would need a way to fetch it. 
+              // For this implementation, we'll display a placeholder or the raw ID if no link.
+              text = data.media.caption || text;
+              // If your backend provides a link, use it, otherwise we can't display it easily without a backend proxy
+              // mediaUrl = data.media.link; 
+          }
+
+          const newMessage: Message = {
+              id: data.id,
+              text: text,
+              mediaUrl: mediaUrl, // Will be undefined unless backend sends a link
+              timestamp: timestamp,
+              direction: 'incoming',
+              status: 'read', // Auto-mark as read locally
+              type: messageType
+          };
+
+          setContacts(prev => {
+              const existing = prev.find(c => c.id === contactId);
+              if (existing) {
+                  // Prevent duplicates
+                  if (existing.messages.some(m => m.id === newMessage.id)) return prev;
+                  
+                  return prev.map(c => c.id === contactId ? {
+                      ...c,
+                      messages: [...c.messages, newMessage],
+                      lastMessage: messageType === MessageType.TEXT ? text : `Sent ${messageType}`,
+                      lastMessageTime: timestamp,
+                      unreadCount: c.id === activeContactId ? 0 : c.unreadCount + 1
+                  } : c);
+              } else {
+                  // New Contact
+                  return [{
+                      id: contactId,
+                      name: `+${contactId}`, // Default name
+                      unreadCount: 1,
+                      messages: [newMessage],
+                      lastMessage: messageType === MessageType.TEXT ? text : `Sent ${messageType}`,
+                      lastMessageTime: timestamp
+                  }, ...prev];
+              }
+          });
+
+      } else if (type === 'status') {
+          // Status Update (sent, delivered, read)
+          const contactId = data.recipient_id;
+          const msgId = data.id;
+          const newStatus = data.status; // sent, delivered, read
+
+          setContacts(prev => prev.map(c => {
+              if (c.id !== contactId) return c;
+              return {
+                  ...c,
+                  messages: c.messages.map(m => m.id === msgId ? { ...m, status: newStatus } : m)
+              };
+          }));
+      }
   };
 
   // Helper to determine message type from file
@@ -72,45 +212,53 @@ const Page: React.FC = () => {
   };
 
   const handleSendMessage = async (text: string) => {
-    if (!activeContact) return;
+    if (!activeContact || !creds) {
+        if (!creds) alert("Please configure your Meta API Credentials first.");
+        return;
+    }
 
+    // Optimistic Update
+    const tempId = 'temp_' + Date.now();
     const newMessage: Message = {
-      id: Date.now().toString(),
+      id: tempId,
       text,
       timestamp: Date.now(),
       direction: 'outgoing',
-      status: 'sent', // Initial status
+      status: 'sent', 
       type: MessageType.TEXT
     };
 
     updateContactMessages(activeContact.id, newMessage);
+    setIsSending(true);
 
-    if (creds) {
-      setIsSending(true);
-      try {
-        await sendMetaTextMessage(creds, activeContact.id, text);
-        simulateRealTimeStatus(activeContact.id, newMessage.id);
-      } catch (error) {
-        console.error("Meta API Error:", error);
-        addWebhookLog('status', `Failed to send to Meta: ${error}`, 'system');
-      } finally {
-        setIsSending(false);
-      }
-    } else {
-        // Simulate success for offline demo
-        simulateRealTimeStatus(activeContact.id, newMessage.id);
+    try {
+      const response = await sendMetaTextMessage(creds, activeContact.id, text);
+      // Update with real ID from Meta
+      const realId = response.messages[0].id;
+      
+      setContacts(prev => prev.map(c => {
+          if (c.id !== activeContact.id) return c;
+          return {
+              ...c,
+              messages: c.messages.map(m => m.id === tempId ? { ...m, id: realId } : m)
+          };
+      }));
+
+    } catch (error: any) {
+      console.error("Meta API Error:", error);
+      alert(`Failed to send: ${error.message}`);
+      // Mark as failed in UI (optional, for now we just keep it sent)
+    } finally {
+      setIsSending(false);
     }
-
-    simulateIncomingReply(activeContact.id, text);
   };
 
   const handleSaveTemplate = (template: CustomTemplate) => {
     setCustomTemplates([...customTemplates, template]);
-    addWebhookLog('system', `Template created: ${template.name}`, 'system');
   };
 
   const handleSendTemplate = async (templateName: string, lang: string, variables: string[] = []) => {
-    if (!activeContact) return;
+    if (!activeContact || !creds) return;
     setIsTemplateOpen(false);
 
     let displayText = `Template: ${templateName}`;
@@ -118,8 +266,9 @@ const Page: React.FC = () => {
         displayText += `\nParams: [${variables.join(', ')}]`;
     }
 
+    const tempId = 'temp_' + Date.now();
     const newMessage: Message = {
-        id: Date.now().toString(),
+        id: tempId,
         text: displayText,
         templateName,
         timestamp: Date.now(),
@@ -129,33 +278,36 @@ const Page: React.FC = () => {
     };
 
     updateContactMessages(activeContact.id, newMessage);
+    setIsSending(true);
 
-    if (creds) {
-        setIsSending(true);
-        try {
-            await sendMetaTemplateMessage(creds, activeContact.id, templateName, lang, variables);
-            simulateRealTimeStatus(activeContact.id, newMessage.id);
-        } catch (e) {
-            console.error(e);
-            addWebhookLog('status', `Template send failed: ${e}`, 'system');
-        } finally {
-            setIsSending(false);
-        }
-    } else {
-        simulateRealTimeStatus(activeContact.id, newMessage.id);
+    try {
+        const response = await sendMetaTemplateMessage(creds, activeContact.id, templateName, lang, variables);
+        const realId = response.messages[0].id;
+        
+        setContacts(prev => prev.map(c => {
+            if (c.id !== activeContact.id) return c;
+            return {
+                ...c,
+                messages: c.messages.map(m => m.id === tempId ? { ...m, id: realId } : m)
+            };
+        }));
+    } catch (e: any) {
+        console.error(e);
+        alert(`Template send failed: ${e.message}`);
+    } finally {
+        setIsSending(false);
     }
-
-    simulateIncomingReply(activeContact.id, `[System: Received template ${templateName}]`);
   };
 
   const handleSendMedia = async (file: File) => {
-     if (!activeContact) return;
+     if (!activeContact || !creds) return;
      
      const msgType = getMessageTypeFromFile(file);
      const objectUrl = URL.createObjectURL(file);
 
+     const tempId = 'temp_' + Date.now();
      const newMessage: Message = {
-         id: Date.now().toString(),
+         id: tempId,
          text: file.name, 
          mediaUrl: objectUrl,
          timestamp: Date.now(),
@@ -165,38 +317,30 @@ const Page: React.FC = () => {
      };
 
      updateContactMessages(activeContact.id, newMessage);
+     setIsSending(true);
 
-     if (creds) {
-        setIsSending(true);
-        try {
-            const uploadRes = await uploadMediaToMeta(creds, file);
-            const apiType = msgType === MessageType.IMAGE ? 'image' : 
-                            msgType === MessageType.VIDEO ? 'video' : 'audio';
-            
-            await sendMetaMediaMessage(creds, activeContact.id, apiType, uploadRes.id, file.name);
-            simulateRealTimeStatus(activeContact.id, newMessage.id);
-        } catch (e) {
-            console.error("Media Upload/Send Failed:", e);
-        } finally {
-            setIsSending(false);
-        }
-     } else {
-        simulateRealTimeStatus(activeContact.id, newMessage.id);
+     try {
+        const uploadRes = await uploadMediaToMeta(creds, file);
+        const apiType = msgType === MessageType.IMAGE ? 'image' : 
+                        msgType === MessageType.VIDEO ? 'video' : 'audio';
+        
+        const response = await sendMetaMediaMessage(creds, activeContact.id, apiType, uploadRes.id, file.name);
+        const realId = response.messages[0].id;
+        
+        setContacts(prev => prev.map(c => {
+            if (c.id !== activeContact.id) return c;
+            return {
+                ...c,
+                messages: c.messages.map(m => m.id === tempId ? { ...m, id: realId } : m)
+            };
+        }));
+
+     } catch (e: any) {
+        console.error("Media Upload/Send Failed:", e);
+        alert(`Media send failed: ${e.message}`);
+     } finally {
+        setIsSending(false);
      }
-
-     simulateIncomingReply(activeContact.id, `[User sent a ${msgType}]`);
-  };
-
-  const simulateRealTimeStatus = (contactId: string, msgId: string) => {
-      setTimeout(() => {
-          updateMessageStatus(contactId, msgId, 'delivered');
-          addWebhookLog('status', `Message ${msgId} status: DELIVERED`, 'incoming');
-      }, 1500 + Math.random() * 1000);
-
-      setTimeout(() => {
-          updateMessageStatus(contactId, msgId, 'read');
-          addWebhookLog('status', `Message ${msgId} status: READ`, 'incoming');
-      }, 3500 + Math.random() * 2000);
   };
 
   const updateContactMessages = (contactId: string, message: Message) => {
@@ -213,54 +357,6 @@ const Page: React.FC = () => {
       return c;
     }));
   };
-
-  const updateMessageStatus = (contactId: string, msgId: string, status: 'delivered' | 'read') => {
-      setContacts(prev => prev.map(c => {
-          if (c.id !== contactId) return c;
-          return {
-              ...c,
-              messages: c.messages.map(m => m.id === msgId ? { ...m, status } : m)
-          };
-      }));
-  };
-
-  const simulateIncomingReply = useCallback(async (contactId: string, userText: string) => {
-     const contact = contacts.find(c => c.id === contactId);
-     const history = contact ? contact.messages.map(m => m.text || '').slice(-5) : [];
-     
-     setTimeout(async () => {
-        setContacts(prev => prev.map(c => {
-             if (c.id !== contactId) return c;
-             const msgs = c.messages.map(m => ({ ...m, status: 'read' as const }));
-             return { ...c, messages: msgs };
-        }));
-
-        const replyText = await generateCustomerReply(history, userText);
-
-        const replyMsg: Message = {
-            id: Date.now().toString(),
-            text: replyText,
-            timestamp: Date.now(),
-            direction: 'incoming',
-            status: 'read',
-            type: MessageType.TEXT
-        };
-
-        setContacts(prev => prev.map(c => {
-            if (c.id === contactId) {
-                return {
-                    ...c,
-                    messages: [...c.messages, replyMsg],
-                    lastMessage: replyText,
-                    lastMessageTime: Date.now(),
-                    unreadCount: c.id === activeContactId ? 0 : c.unreadCount + 1
-                };
-            }
-            return c;
-        }));
-        addWebhookLog('messages', `New message from ${contactId}`, 'incoming');
-     }, 5000 + Math.random() * 2000); 
-  }, [activeContactId, contacts]);
 
   const handleNewChat = () => {
      const phone = prompt("Enter phone number (with country code, e.g., 15550001234):");
@@ -292,8 +388,9 @@ const Page: React.FC = () => {
       
       {/* Navigation Rail (Desktop) */}
       <div className="hidden md:flex w-[80px] flex-col items-center py-8 border-r border-glass-border glass-panel z-30">
-         <div className="mb-8 w-10 h-10 rounded-xl bg-gradient-to-br from-nebula-glow to-purple-600 flex items-center justify-center shadow-lg animate-pulse-slow">
+         <div className="mb-8 w-10 h-10 rounded-xl bg-gradient-to-br from-nebula-glow to-purple-600 flex items-center justify-center shadow-lg relative group cursor-pointer" title={isConnected ? "Server Connected" : "Connecting..."}>
             <Globe className="text-white" size={20} />
+            <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border border-black ${isConnected ? 'bg-green-500' : 'bg-red-500 animate-pulse'}`}></div>
          </div>
          
          <div className="flex-1 flex flex-col gap-6 w-full items-center">
@@ -376,6 +473,17 @@ const Page: React.FC = () => {
                                 <h1 className="text-2xl md:text-3xl font-display font-bold text-white mb-4 neon-text animate-float">
                                     {creds?.businessName || 'WhatsBiz Nebula'}
                                 </h1>
+                                <div className="flex items-center justify-center gap-2 text-sm text-glass-muted mb-6">
+                                     {isConnected ? (
+                                         <span className="text-green-400 flex items-center gap-1 bg-green-500/10 px-2 py-1 rounded border border-green-500/20">
+                                             <Wifi size={12} /> Server Connected
+                                         </span>
+                                     ) : (
+                                         <span className="text-red-400 flex items-center gap-1 bg-red-500/10 px-2 py-1 rounded border border-red-500/20">
+                                             <WifiOff size={12} /> Disconnected
+                                         </span>
+                                     )}
+                                </div>
                                 <p className="text-sm text-glass-text">Select a conversation to start.</p>
                             </div>
                         </div>
