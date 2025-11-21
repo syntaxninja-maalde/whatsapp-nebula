@@ -1,7 +1,7 @@
 
 import React, { useState, useRef, useEffect } from 'react';
 import { Message, Contact, MessageType } from '../types';
-import { Paperclip, Mic, Send, Smile, MoreVertical, Search, FileAudio, Check, CheckCheck, ArrowLeft, Download, Play } from 'lucide-react';
+import { Paperclip, Mic, Send, Smile, MoreVertical, Search, FileAudio, Check, CheckCheck, ArrowLeft, Download, Square, Circle } from 'lucide-react';
 
 interface ChatWindowProps {
   contact: Contact;
@@ -16,8 +16,14 @@ const MAX_CHARS = 4096;
 
 const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendMedia, onOpenTemplates, isSending, onBack }) => {
   const [inputValue, setInputValue] = useState('');
+  const [isRecording, setIsRecording] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -45,10 +51,68 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendM
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const formatDuration = (seconds: number) => {
+      const mins = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       onSendMedia(e.target.files[0]);
       e.target.value = '';
+    }
+  };
+
+  const toggleRecording = async () => {
+    if (isRecording) {
+        stopRecording();
+    } else {
+        startRecording();
+    }
+  };
+
+  const startRecording = async () => {
+    try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const mediaRecorder = new MediaRecorder(stream);
+        mediaRecorderRef.current = mediaRecorder;
+        chunksRef.current = [];
+
+        mediaRecorder.ondataavailable = (e) => {
+            if (e.data.size > 0) {
+                chunksRef.current.push(e.data);
+            }
+        };
+
+        mediaRecorder.onstop = () => {
+            const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
+            const file = new File([blob], 'voice_note.webm', { type: 'audio/webm' });
+            onSendMedia(file);
+            
+            // Stop all tracks
+            stream.getTracks().forEach(track => track.stop());
+        };
+
+        mediaRecorder.start();
+        setIsRecording(true);
+        setRecordingTime(0);
+        
+        timerRef.current = setInterval(() => {
+            setRecordingTime(prev => prev + 1);
+        }, 1000);
+
+    } catch (err) {
+        console.error("Error accessing microphone:", err);
+        alert("Could not access microphone.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+        mediaRecorderRef.current.stop();
+        setIsRecording(false);
+        if (timerRef.current) clearInterval(timerRef.current);
     }
   };
 
@@ -72,8 +136,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendM
                   className="w-full h-auto object-cover cursor-pointer" 
                 />
               ) : (
-                 <div className="flex items-center justify-center h-48 w-full bg-white/5">
-                    <span className="text-glass-muted text-xs animate-pulse">Encrypting Image...</span>
+                 <div className="flex flex-col items-center justify-center h-48 w-full bg-white/5 gap-2">
+                     <div className="w-8 h-8 border-2 border-glass-muted border-t-nebula-glow rounded-full animate-spin"></div>
+                    <span className="text-glass-muted text-xs animate-pulse">Decrypting Media...</span>
                  </div>
               )}
             </div>
@@ -92,8 +157,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendM
                   className="w-full h-auto object-cover"
                 />
               ) : (
-                 <div className="flex items-center justify-center h-48 w-full bg-white/5">
-                    <span className="text-glass-muted text-xs animate-pulse">Encrypting Video...</span>
+                 <div className="flex flex-col items-center justify-center h-48 w-full bg-white/5 gap-2">
+                    <div className="w-8 h-8 border-2 border-glass-muted border-t-nebula-glow rounded-full animate-spin"></div>
+                    <span className="text-glass-muted text-xs animate-pulse">Decrypting Video...</span>
                  </div>
               )}
             </div>
@@ -121,7 +187,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendM
                              </a>
                          </div>
                     ) : (
-                         <div className="text-xs text-glass-muted animate-pulse">Processing Audio Stream...</div>
+                         <div className="flex items-center gap-2">
+                            <div className="w-4 h-4 border-2 border-glass-muted border-t-nebula-glow rounded-full animate-spin"></div>
+                            <div className="text-xs text-glass-muted animate-pulse">Processing Audio Stream...</div>
+                         </div>
                     )}
                 </div>
             </div>
@@ -156,8 +225,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendM
              <img src={contact.avatar || `https://ui-avatars.com/api/?name=${contact.name}&background=random`} alt="avatar" className="w-full h-full rounded-full object-cover relative z-10 p-[2px]" />
           </div>
           <div className="min-w-0">
-            <h3 className="text-white font-display font-bold text-base md:text-lg group-hover:text-nebula-glow transition-colors truncate tracking-wide">{contact.name}</h3>
-            <p className="text-xs text-glass-muted flex items-center gap-1.5 truncate font-mono">
+             <div className="flex items-center gap-2">
+                <h3 className="text-white font-display font-bold text-base md:text-lg group-hover:text-nebula-glow transition-colors truncate tracking-wide">{contact.name}</h3>
+                <span className="text-[10px] text-glass-muted font-mono bg-white/5 px-1.5 rounded border border-white/5">{formatTime(contact.lastMessageTime || Date.now())}</span>
+             </div>
+             <p className="text-xs text-glass-muted flex items-center gap-1.5 truncate font-mono mt-0.5">
                <span className="w-1.5 h-1.5 rounded-full bg-green-500 shrink-0 shadow-[0_0_8px_rgba(34,197,94,0.8)] animate-pulse"></span> 
                SECURE LINK ACTIVE
             </p>
@@ -222,7 +294,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendM
                 type="file" 
                 className="hidden" 
                 ref={fileInputRef} 
-                accept="image/*,video/*,audio/*"
+                accept="image/*,video/*,audio/*,application/pdf"
                 onChange={handleFileChange}
             />
             <button 
@@ -235,23 +307,32 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendM
         </div>
 
         <div className="flex-1 relative">
-            <div className="min-h-[50px] bg-transparent border border-white/20 rounded-2xl flex items-center px-3 md:px-4 gap-2 md:gap-3 focus-within:border-nebula-glow focus-within:bg-white/5 transition-all focus-within:shadow-[0_0_15px_rgba(0,210,255,0.1)] w-full relative overflow-hidden">
-                <Smile className="w-5 h-5 md:w-6 md:h-6 text-glass-muted cursor-pointer hover:text-yellow-400 transition-colors hidden sm:block hover:scale-110 shrink-0" />
-                <input 
-                    type="text" 
-                    value={inputValue}
-                    onChange={(e) => setInputValue(e.target.value)}
-                    onKeyDown={handleKeyPress}
-                    placeholder="Type a message..."
-                    maxLength={MAX_CHARS}
-                    className="bg-transparent border-none outline-none text-white w-full placeholder-glass-muted text-sm md:text-[15px] py-3 pr-10"
-                />
-                {/* Character Counter Integrated inside input */}
-                <div className="absolute right-3 bottom-3 text-[9px] font-mono text-glass-muted opacity-50 pointer-events-none">
-                    {inputValue.length}
-                    <span className="mx-0.5">/</span>
-                    {MAX_CHARS}
-                </div>
+            <div className={`min-h-[50px] bg-transparent border rounded-2xl flex items-center px-3 md:px-4 gap-2 md:gap-3 transition-all w-full relative overflow-hidden ${isRecording ? 'border-red-500/50 bg-red-500/10 shadow-[0_0_15px_rgba(239,68,68,0.2)]' : 'border-white/20 focus-within:border-nebula-glow focus-within:bg-white/5 focus-within:shadow-[0_0_15px_rgba(0,210,255,0.1)]'}`}>
+                {isRecording ? (
+                     <div className="flex-1 flex items-center gap-3 text-red-400 animate-pulse">
+                         <Circle size={12} fill="currentColor" />
+                         <span className="font-mono text-sm font-bold">Recording Audio... {formatDuration(recordingTime)}</span>
+                     </div>
+                ) : (
+                    <>
+                        <Smile className="w-5 h-5 md:w-6 md:h-6 text-glass-muted cursor-pointer hover:text-yellow-400 transition-colors hidden sm:block hover:scale-110 shrink-0" />
+                        <input 
+                            type="text" 
+                            value={inputValue}
+                            onChange={(e) => setInputValue(e.target.value)}
+                            onKeyDown={handleKeyPress}
+                            placeholder="Type a message..."
+                            maxLength={MAX_CHARS}
+                            className="bg-transparent border-none outline-none text-white w-full placeholder-glass-muted text-sm md:text-[15px] py-3 pr-10"
+                        />
+                        {/* Character Counter */}
+                        <div className="absolute right-3 bottom-3 text-[9px] font-mono text-glass-muted opacity-50 pointer-events-none">
+                            {inputValue.length}
+                            <span className="mx-0.5">/</span>
+                            {MAX_CHARS}
+                        </div>
+                    </>
+                )}
             </div>
         </div>
 
@@ -265,8 +346,11 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contact, onSendMessage, onSendM
                 <Send className="w-4 h-4 md:w-5 md:h-5 ml-1" />
             </button>
             ) : (
-            <button className="btn-base btn-glass w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center text-glass-muted hover:text-white shrink-0 hover:bg-white/10 transition-all">
-                <Mic className="w-5 h-5 md:w-6 md:h-6" />
+            <button 
+                onClick={toggleRecording}
+                className={`btn-base w-10 h-10 md:w-12 md:h-12 rounded-full flex items-center justify-center shrink-0 transition-all ${isRecording ? 'bg-red-500 text-white shadow-[0_0_20px_rgba(239,68,68,0.5)] hover:scale-110' : 'btn-glass text-glass-muted hover:text-white hover:bg-white/10'}`}
+            >
+                {isRecording ? <Square fill="currentColor" className="w-4 h-4" /> : <Mic className="w-5 h-5 md:w-6 md:h-6" />}
             </button>
             )}
         </div>

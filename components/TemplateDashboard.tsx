@@ -39,11 +39,8 @@ const TemplateDashboard: React.FC<TemplateDashboardProps> = ({ creds, onBack }) 
       setTemplates(data);
     } catch (err: any) {
       setError(err.message);
-      setTemplates([
-        { id: '1', name: 'welcome_offer', language: 'en_US', status: 'APPROVED', category: 'MARKETING', components: [{ type: 'BODY', text: 'Hi {{1}}, welcome to our store! Here is your 20% off coupon.' }], body: 'Hi {{1}}, welcome to our store! Here is your 20% off coupon.', variableCount: 1 },
-        { id: '2', name: 'order_update', language: 'en_US', status: 'PENDING', category: 'UTILITY', components: [{ type: 'HEADER', format: 'TEXT', text: 'Order Update' }, { type: 'BODY', text: 'Your order #{{1}} has shipped.' }], body: 'Your order #{{1}} has shipped.', variableCount: 1 },
-        { id: '3', name: 'rejected_promo', language: 'en_US', status: 'REJECTED', category: 'MARKETING', components: [{ type: 'BODY', text: 'Buy now!!!' }], body: 'Buy now!!!', variableCount: 0 },
-      ]);
+      // Removed demo data fallback to avoid confusion with real data
+      setTemplates([]);
     } finally {
       setIsLoading(false);
     }
@@ -219,25 +216,32 @@ const TemplateDashboard: React.FC<TemplateDashboardProps> = ({ creds, onBack }) 
         )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 overflow-y-auto custom-scrollbar pb-20">
-          {templates.map((t) => (
-            <div key={t.id} className="glass-panel p-5 rounded-2xl group hover:border-nebula-glow/30 transition-all hover:-translate-y-1 hover:shadow-2xl bg-black/20">
-               <div className="flex justify-between items-start mb-3">
-                  <h3 className="font-bold text-white text-base truncate w-2/3 group-hover:text-nebula-glow transition-colors">{t.name}</h3>
-                  {renderStatus(t.status)}
-               </div>
-               <div className="flex gap-2 mb-4">
-                   <span className="text-[9px] uppercase tracking-wider bg-white/5 px-2 py-1 rounded text-glass-muted border border-white/5">{t.language}</span>
-                   <span className="text-[9px] uppercase tracking-wider bg-white/5 px-2 py-1 rounded text-glass-muted border border-white/5">{t.category}</span>
-               </div>
-               <p className="text-xs text-glass-text line-clamp-3 h-[45px] mb-4 font-light leading-relaxed opacity-80">
-                  {t.body || t.components.find(c => c.type === 'BODY')?.text || 'No text content'}
-               </p>
-               <div className="flex justify-between items-center text-[10px] text-glass-muted border-t border-glass-border pt-3">
-                   <span className="font-mono">{t.components.length} BLOCKS</span>
-                   <span className="font-mono opacity-50">#{t.id.substring(0, 6)}</span>
-               </div>
-            </div>
-          ))}
+          {templates.length === 0 && !isLoading ? (
+              <div className="col-span-full flex flex-col items-center justify-center py-12 text-glass-muted opacity-60">
+                  <LayoutTemplate size={48} className="mb-4 opacity-50"/>
+                  <p>No templates found for this Business Account.</p>
+              </div>
+          ) : (
+            templates.map((t) => (
+                <div key={t.id} className="glass-panel p-5 rounded-2xl group hover:border-nebula-glow/30 transition-all hover:-translate-y-1 hover:shadow-2xl bg-black/20">
+                <div className="flex justify-between items-start mb-3">
+                    <h3 className="font-bold text-white text-base truncate w-2/3 group-hover:text-nebula-glow transition-colors">{t.name}</h3>
+                    {renderStatus(t.status)}
+                </div>
+                <div className="flex gap-2 mb-4">
+                    <span className="text-[9px] uppercase tracking-wider bg-white/5 px-2 py-1 rounded text-glass-muted border border-white/5">{t.language}</span>
+                    <span className="text-[9px] uppercase tracking-wider bg-white/5 px-2 py-1 rounded text-glass-muted border border-white/5">{t.category}</span>
+                </div>
+                <p className="text-xs text-glass-text line-clamp-3 h-[45px] mb-4 font-light leading-relaxed opacity-80">
+                    {t.body || t.components.find(c => c.type === 'BODY')?.text || 'No text content'}
+                </p>
+                <div className="flex justify-between items-center text-[10px] text-glass-muted border-t border-glass-border pt-3">
+                    <span className="font-mono">{t.components.length} BLOCKS</span>
+                    <span className="font-mono opacity-50">#{t.id.substring(0, 6)}</span>
+                </div>
+                </div>
+            ))
+          )}
         </div>
       </div>
     );

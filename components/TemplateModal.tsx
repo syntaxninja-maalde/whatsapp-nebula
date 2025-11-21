@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { X, LayoutTemplate, Send, Globe, Plus, Save, ArrowLeft, MessageSquareDashed } from 'lucide-react';
 import { CustomTemplate } from '../types';
@@ -9,39 +10,6 @@ interface TemplateModalProps {
   customTemplates: CustomTemplate[];
   onSaveTemplate: (template: CustomTemplate) => void;
 }
-
-const SAMPLE_TEMPLATES: CustomTemplate[] = [
-  { 
-    id: '1', 
-    name: 'hello_world', 
-    language: 'en_US', 
-    category: 'UTILITY', 
-    body: 'Welcome and congratulations. This message demonstrates your ability to send a message notification from WhatsApp Business Platform’s Cloud API.', 
-    variableCount: 0,
-    status: 'APPROVED',
-    components: [{ type: 'BODY', text: 'Welcome and congratulations. This message demonstrates your ability to send a message notification from WhatsApp Business Platform’s Cloud API.' }]
-  },
-  { 
-    id: '2', 
-    name: 'shipping_update', 
-    language: 'en_US', 
-    category: 'UTILITY', 
-    body: 'Your package has been shipped! It will arrive on {{1}}.', 
-    variableCount: 1,
-    status: 'APPROVED',
-    components: [{ type: 'BODY', text: 'Your package has been shipped! It will arrive on {{1}}.' }]
-  },
-  { 
-    id: '3', 
-    name: 'reservation_update', 
-    language: 'en_US', 
-    category: 'UTILITY', 
-    body: 'Hi {{1}}, your reservation for {{2}} at {{3}} is confirmed.', 
-    variableCount: 3,
-    status: 'APPROVED',
-    components: [{ type: 'BODY', text: 'Hi {{1}}, your reservation for {{2}} at {{3}} is confirmed.' }]
-  },
-];
 
 const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, customTemplates, onSaveTemplate }) => {
   const [mode, setMode] = useState<'select' | 'create' | 'fill'>('select');
@@ -55,7 +23,8 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, 
   // Form State for Filling Variables
   const [variableValues, setVariableValues] = useState<string[]>([]);
 
-  const allTemplates = useMemo(() => [...SAMPLE_TEMPLATES, ...customTemplates], [customTemplates]);
+  // We prioritise passed templates (real ones) over emptiness
+  const allTemplates = customTemplates;
 
   if (!isOpen) return null;
 
@@ -215,26 +184,32 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, 
             </button>
 
             <div className="space-y-3 mb-2 max-h-[300px] overflow-y-auto pr-2 custom-scrollbar relative z-10">
-            {allTemplates.map((t) => (
-                <div 
-                key={t.id}
-                onClick={() => handleSelect(t)}
-                className="p-4 rounded-xl border border-glass-border bg-black/20 hover:bg-white/5 cursor-pointer transition-all duration-300 group hover:border-glass-highlight hover:scale-[0.99]"
-                >
-                <div className="flex justify-between items-start mb-1">
-                    <h3 className="font-bold text-sm text-white group-hover:text-nebula-glow transition-colors">{t.name}</h3>
-                    <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 text-glass-muted">{t.language}</span>
-                </div>
-                <p className="text-xs text-glass-text opacity-80 line-clamp-2 font-light">{t.body}</p>
-                {t.variableCount! > 0 && (
-                    <div className="mt-2 flex items-center gap-1">
-                         <span className="text-[10px] text-pink-400 bg-pink-500/10 px-1.5 py-0.5 rounded border border-pink-500/20">
-                             {t.variableCount} Variables
-                         </span>
+            {allTemplates.length === 0 ? (
+                 <div className="text-center py-8 text-glass-muted text-xs">
+                    No templates found. <br/> Create one or fetch from Meta.
+                 </div>
+            ) : (
+                allTemplates.map((t) => (
+                    <div 
+                    key={t.id || t.name}
+                    onClick={() => handleSelect(t)}
+                    className="p-4 rounded-xl border border-glass-border bg-black/20 hover:bg-white/5 cursor-pointer transition-all duration-300 group hover:border-glass-highlight hover:scale-[0.99]"
+                    >
+                    <div className="flex justify-between items-start mb-1">
+                        <h3 className="font-bold text-sm text-white group-hover:text-nebula-glow transition-colors">{t.name}</h3>
+                        <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 text-glass-muted">{t.language}</span>
                     </div>
-                )}
-                </div>
-            ))}
+                    <p className="text-xs text-glass-text opacity-80 line-clamp-2 font-light">{t.body}</p>
+                    {t.variableCount! > 0 && (
+                        <div className="mt-2 flex items-center gap-1">
+                            <span className="text-[10px] text-pink-400 bg-pink-500/10 px-1.5 py-0.5 rounded border border-pink-500/20">
+                                {t.variableCount} Variables
+                            </span>
+                        </div>
+                    )}
+                    </div>
+                ))
+            )}
             </div>
         </>
     );

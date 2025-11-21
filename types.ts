@@ -18,6 +18,7 @@ export interface Message {
   id: string;
   text?: string;
   mediaUrl?: string;
+  mediaId?: string; // Added to support fetching media later if it fails initially
   timestamp: number;
   direction: 'incoming' | 'outgoing';
   status: 'sent' | 'delivered' | 'read' | 'failed';

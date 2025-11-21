@@ -159,6 +159,29 @@ export const sendMetaMediaMessage = async (
   return response.json();
 };
 
+export const retrieveMediaUrl = async (
+  creds: MetaCredentials,
+  mediaId: string
+): Promise<string> => {
+  // 1. Get the Media URL
+  const urlResponse = await fetch(`${BASE_URL}/${GRAPH_API_VERSION}/${mediaId}`, {
+    headers: { 'Authorization': `Bearer ${creds.accessToken}` }
+  });
+  
+  if (!urlResponse.ok) throw new Error('Failed to get media URL');
+  const { url } = await urlResponse.json();
+
+  // 2. Download the binary data
+  const binaryResponse = await fetch(url, {
+    headers: { 'Authorization': `Bearer ${creds.accessToken}` }
+  });
+
+  if (!binaryResponse.ok) throw new Error('Failed to download media binary');
+  const blob = await binaryResponse.blob();
+  
+  return URL.createObjectURL(blob);
+};
+
 // --- Template Management APIs ---
 
 export const getMetaTemplates = async (
