@@ -44,10 +44,40 @@ export const sendMetaTemplateMessage = async (
   to: string,
   templateName: string,
   languageCode: string = 'en_US',
-  variables: string[] = []
+  variables: string[] = [],
+  headerMediaId?: string,
+  headerType?: 'IMAGE' | 'VIDEO' | 'DOCUMENT'
 ): Promise<MetaSendMessageResponse> => {
   const url = `${BASE_URL}/${GRAPH_API_VERSION}/${creds.phoneNumberId}/messages`;
   
+  const components: any[] = [];
+
+  // 1. Header Component (if media is provided)
+  if (headerMediaId && headerType) {
+    components.push({
+      type: "header",
+      parameters: [
+        {
+          type: headerType.toLowerCase(),
+          [headerType.toLowerCase()]: {
+            id: headerMediaId
+          }
+        }
+      ]
+    });
+  }
+
+  // 2. Body Component (if variables exist)
+  if (variables.length > 0) {
+    components.push({
+      type: "body",
+      parameters: variables.map(variable => ({
+        type: "text",
+        text: variable
+      }))
+    });
+  }
+
   const payload: any = {
     messaging_product: "whatsapp",
     to: to,
@@ -56,22 +86,10 @@ export const sendMetaTemplateMessage = async (
       name: templateName,
       language: {
         code: languageCode
-      }
+      },
+      components: components.length > 0 ? components : undefined
     }
   };
-
-  // If variables exist, add the components structure
-  if (variables.length > 0) {
-    payload.template.components = [
-      {
-        type: "body",
-        parameters: variables.map(variable => ({
-          type: "text",
-          text: variable
-        }))
-      }
-    ];
-  }
 
   const response = await fetch(url, {
     method: 'POST',
@@ -120,9 +138,10 @@ export const uploadMediaToMeta = async (
 export const sendMetaMediaMessage = async (
   creds: MetaCredentials,
   to: string,
-  type: 'image' | 'video' | 'audio',
+  type: 'image' | 'video' | 'audio' | 'document',
   mediaId: string,
-  caption?: string
+  caption?: string,
+  filename?: string
 ): Promise<MetaSendMessageResponse> => {
   const url = `${BASE_URL}/${GRAPH_API_VERSION}/${creds.phoneNumberId}/messages`;
   
@@ -132,6 +151,10 @@ export const sendMetaMediaMessage = async (
 
   if (caption && type !== 'audio') {
     mediaObject.caption = caption;
+  }
+
+  if (type === 'document' && filename) {
+    mediaObject.filename = filename;
   }
 
   const payload = {
@@ -163,23 +186,24 @@ export const retrieveMediaUrl = async (
   creds: MetaCredentials,
   mediaId: string
 ): Promise<string> => {
-  // 1. Get the Media URL
+  // 1. Get the Media URL Info
   const urlResponse = await fetch(`${BASE_URL}/${GRAPH_API_VERSION}/${mediaId}`, {
     headers: { 'Authorization': `Bearer ${creds.accessToken}` }
   });
   
-  if (!urlResponse.ok) throw new Error('Failed to get media URL');
+  if (!urlResponse.ok) throw new Error('Failed to get media URL info');
   const { url } = await urlResponse.json();
 
-  // 2. Download the binary data
-  const binaryResponse = await fetch(url, {
-    headers: { 'Authorization': `Bearer ${creds.accessToken}` }
-  });
-
-  if (!binaryResponse.ok) throw new Error('Failed to download media binary');
-  const blob = await binaryResponse.blob();
+  // 2. Construct a Direct URL for browser consumption
+  // We append the access_token as a query param. This avoids CORS issues with the 'Authorization' header
+  // when using the URL in an <img> tag or simple download link.
+  // Note: This exposes the token in the DOM, but for a client-side app without a backend proxy, 
+  // this is the only way to render private Meta media.
   
-  return URL.createObjectURL(blob);
+  const authenticatedUrl = new URL(url);
+  authenticatedUrl.searchParams.append('access_token', creds.accessToken);
+  
+  return authenticatedUrl.toString();
 };
 
 // --- Template Management APIs ---

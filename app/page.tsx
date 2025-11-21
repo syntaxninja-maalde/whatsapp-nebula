@@ -79,7 +79,7 @@ const Page: React.FC = () => {
         for (const contact of contactsCopy) {
             for (const msg of contact.messages) {
                 // If it's media, incoming, has a mediaId but NO mediaUrl
-                if ((msg.type === MessageType.IMAGE || msg.type === MessageType.VIDEO || msg.type === MessageType.AUDIO) && 
+                if ((msg.type === MessageType.IMAGE || msg.type === MessageType.VIDEO || msg.type === MessageType.AUDIO || msg.type === MessageType.DOCUMENT) && 
                     msg.mediaId && 
                     !msg.mediaUrl && 
                     msg.direction === 'incoming') {
@@ -166,8 +166,10 @@ const Page: React.FC = () => {
               if (mime.startsWith('image')) messageType = MessageType.IMAGE;
               else if (mime.startsWith('video')) messageType = MessageType.VIDEO;
               else if (mime.startsWith('audio')) messageType = MessageType.AUDIO;
+              else if (mime.startsWith('application') || mime.startsWith('text')) messageType = MessageType.DOCUMENT;
               
-              text = data.media.caption || text;
+              // Use filename as text for docs if no caption
+              text = data.media.caption || data.media.filename || text;
               mediaId = data.media.id;
           }
 
@@ -238,7 +240,8 @@ const Page: React.FC = () => {
     if (file.type.startsWith('image/')) return MessageType.IMAGE;
     if (file.type.startsWith('video/')) return MessageType.VIDEO;
     if (file.type.startsWith('audio/')) return MessageType.AUDIO;
-    return MessageType.IMAGE;
+    if (file.type.startsWith('application/')) return MessageType.DOCUMENT;
+    return MessageType.DOCUMENT;
   };
 
   const handleSendMessage = async (text: string) => {
@@ -269,7 +272,7 @@ const Page: React.FC = () => {
     }
   };
 
-  const handleSendTemplate = async (templateName: string, lang: string, variables: string[] = []) => {
+  const handleSendTemplate = async (templateName: string, lang: string, variables: string[] = [], headerFile?: File) => {
     if (!activeContact || !creds) return;
     setIsTemplateOpen(false);
     const tempId = 'temp_' + Date.now();
@@ -284,8 +287,21 @@ const Page: React.FC = () => {
     };
     updateContactMessages(activeContact.id, newMessage);
     setIsSending(true);
+
     try {
-        const response = await sendMetaTemplateMessage(creds, activeContact.id, templateName, lang, variables);
+        let headerMediaId = undefined;
+        let headerType: 'IMAGE' | 'VIDEO' | 'DOCUMENT' | undefined = undefined;
+
+        // Upload Header Media if provided
+        if (headerFile) {
+            const uploadRes = await uploadMediaToMeta(creds, headerFile);
+            headerMediaId = uploadRes.id;
+            if (headerFile.type.startsWith('image/')) headerType = 'IMAGE';
+            else if (headerFile.type.startsWith('video/')) headerType = 'VIDEO';
+            else headerType = 'DOCUMENT';
+        }
+
+        const response = await sendMetaTemplateMessage(creds, activeContact.id, templateName, lang, variables, headerMediaId, headerType);
         const realId = response.messages[0].id;
         setContacts(prev => prev.map(c => c.id === activeContact.id ? { ...c, messages: c.messages.map(m => m.id === tempId ? { ...m, id: realId } : m) } : c));
     } catch (e: any) {
@@ -314,8 +330,10 @@ const Page: React.FC = () => {
      try {
         const uploadRes = await uploadMediaToMeta(creds, file);
         const apiType = msgType === MessageType.IMAGE ? 'image' : 
-                        msgType === MessageType.VIDEO ? 'video' : 'audio';
-        const response = await sendMetaMediaMessage(creds, activeContact.id, apiType, uploadRes.id, file.name);
+                        msgType === MessageType.VIDEO ? 'video' : 
+                        msgType === MessageType.AUDIO ? 'audio' : 'document';
+                        
+        const response = await sendMetaMediaMessage(creds, activeContact.id, apiType, uploadRes.id, file.name, file.name);
         const realId = response.messages[0].id;
         setContacts(prev => prev.map(c => c.id === activeContact.id ? { ...c, messages: c.messages.map(m => m.id === tempId ? { ...m, id: realId } : m) } : c));
      } catch (e: any) {

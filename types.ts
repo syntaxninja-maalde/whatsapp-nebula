@@ -11,7 +11,8 @@ export enum MessageType {
   IMAGE = 'image',
   TEMPLATE = 'template',
   AUDIO = 'audio',
-  VIDEO = 'video'
+  VIDEO = 'video',
+  DOCUMENT = 'document'
 }
 
 export interface Message {

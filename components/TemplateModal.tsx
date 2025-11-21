@@ -1,12 +1,12 @@
 
-import React, { useState, useMemo } from 'react';
-import { X, LayoutTemplate, Send, Globe, Plus, Save, ArrowLeft, MessageSquareDashed } from 'lucide-react';
+import React, { useState, useMemo, useRef } from 'react';
+import { X, LayoutTemplate, Send, Globe, Plus, Save, ArrowLeft, MessageSquareDashed, Upload, Image as ImageIcon, FileText, Video } from 'lucide-react';
 import { CustomTemplate } from '../types';
 
 interface TemplateModalProps {
   isOpen: boolean;
   onClose: () => void;
-  onSend: (templateName: string, lang: string, variables: string[]) => void;
+  onSend: (templateName: string, lang: string, variables: string[], headerFile?: File) => void;
   customTemplates: CustomTemplate[];
   onSaveTemplate: (template: CustomTemplate) => void;
 }
@@ -22,6 +22,10 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, 
 
   // Form State for Filling Variables
   const [variableValues, setVariableValues] = useState<string[]>([]);
+  
+  // Form State for Header Media
+  const [headerFile, setHeaderFile] = useState<File | undefined>(undefined);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // We prioritise passed templates (real ones) over emptiness
   const allTemplates = customTemplates;
@@ -57,20 +61,26 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, 
 
   const handleSelect = (t: CustomTemplate) => {
     setSelectedTemplate(t);
-    if (t.variableCount > 0) {
-        setVariableValues(Array(t.variableCount).fill(''));
+    setHeaderFile(undefined); // Reset header file
+    if (t.variableCount > 0 || t.components.some(c => c.type === 'HEADER' && c.format && c.format !== 'TEXT')) {
+        setVariableValues(Array(t.variableCount || 0).fill(''));
         setMode('fill');
     } else {
-        setMode('fill');
+        setMode('fill'); // Still go to fill to see preview and confirm
     }
   };
 
   const handleSendFinal = () => {
     if (!selectedTemplate) return;
-    onSend(selectedTemplate.name, selectedTemplate.language, variableValues);
+    onSend(selectedTemplate.name, selectedTemplate.language, variableValues, headerFile);
     setMode('select');
     setSelectedTemplate(null);
     setVariableValues([]);
+    setHeaderFile(undefined);
+  };
+
+  const getHeaderComponent = (t: CustomTemplate) => {
+    return t.components.find(c => c.type === 'HEADER');
   };
 
   const renderContent = () => {
@@ -120,10 +130,29 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, 
     }
 
     if (mode === 'fill' && selectedTemplate) {
+        const headerComp = getHeaderComponent(selectedTemplate);
+        const requiresMedia = headerComp && headerComp.format && headerComp.format !== 'TEXT';
+
         return (
             <div className="space-y-5 relative z-10 animate-in fade-in slide-in-from-right-4 duration-300">
                 <div className="bg-black/20 p-4 rounded-lg border border-glass-border">
                     <h3 className="text-nebula-glow font-mono text-xs mb-2 uppercase">Preview</h3>
+                    
+                    {/* Header Preview Placeholder */}
+                    {requiresMedia && (
+                        <div className="mb-3 h-32 bg-white/5 rounded flex items-center justify-center border border-dashed border-glass-border text-glass-muted gap-2">
+                            {headerFile ? (
+                                <span className="text-white font-bold text-sm flex items-center gap-2">
+                                    <ImageIcon size={16}/> {headerFile.name}
+                                </span>
+                            ) : (
+                                <span className="text-xs">
+                                    {headerComp.format} Header Required
+                                </span>
+                            )}
+                        </div>
+                    )}
+
                     <p className="text-sm text-glass-text leading-relaxed whitespace-pre-wrap">
                         {selectedTemplate.body?.split(/({{\d+}})/).map((part, idx) => {
                             if (part.match(/^{{\d+}}$/)) {
@@ -138,6 +167,32 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, 
                         })}
                     </p>
                 </div>
+                
+                {/* Media Upload for Header */}
+                {requiresMedia && (
+                    <div>
+                        <label className="label-glass text-yellow-400">Required Media ({headerComp.format})</label>
+                        <input 
+                            type="file" 
+                            ref={fileInputRef}
+                            className="hidden"
+                            accept={headerComp.format === 'IMAGE' ? 'image/*' : headerComp.format === 'VIDEO' ? 'video/*' : '.pdf'}
+                            onChange={(e) => {
+                                if (e.target.files?.[0]) setHeaderFile(e.target.files[0]);
+                            }}
+                        />
+                        <button 
+                            onClick={() => fileInputRef.current?.click()}
+                            className={`w-full border border-dashed rounded-xl p-4 flex items-center justify-center gap-2 transition-colors ${headerFile ? 'border-green-500/50 bg-green-500/10 text-green-400' : 'border-glass-border hover:border-nebula-glow text-glass-muted hover:text-white'}`}
+                        >
+                            {headerFile ? (
+                                <>Change File ({headerFile.name})</>
+                            ) : (
+                                <><Upload size={16} /> Upload {headerComp.format}</>
+                            )}
+                        </button>
+                    </div>
+                )}
 
                 {selectedTemplate.variableCount! > 0 && (
                     <div className="space-y-3">
@@ -165,7 +220,11 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, 
                     <button onClick={() => {setMode('select'); setSelectedTemplate(null);}} className="btn-base btn-glass flex-1 py-3 rounded-xl text-sm font-bold">
                         Back
                     </button>
-                    <button onClick={handleSendFinal} className="btn-base btn-primary flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 text-sm">
+                    <button 
+                        onClick={handleSendFinal} 
+                        disabled={requiresMedia && !headerFile}
+                        className={`btn-base flex-1 py-3 rounded-xl font-bold flex items-center justify-center gap-2 text-sm ${requiresMedia && !headerFile ? 'bg-gray-600 cursor-not-allowed opacity-50' : 'btn-primary'}`}
+                    >
                         <Send size={16} /> Send Now
                     </button>
                 </div>
@@ -189,26 +248,35 @@ const TemplateModal: React.FC<TemplateModalProps> = ({ isOpen, onClose, onSend, 
                     No templates found. <br/> Create one or fetch from Meta.
                  </div>
             ) : (
-                allTemplates.map((t) => (
-                    <div 
-                    key={t.id || t.name}
-                    onClick={() => handleSelect(t)}
-                    className="p-4 rounded-xl border border-glass-border bg-black/20 hover:bg-white/5 cursor-pointer transition-all duration-300 group hover:border-glass-highlight hover:scale-[0.99]"
-                    >
-                    <div className="flex justify-between items-start mb-1">
-                        <h3 className="font-bold text-sm text-white group-hover:text-nebula-glow transition-colors">{t.name}</h3>
-                        <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 text-glass-muted">{t.language}</span>
-                    </div>
-                    <p className="text-xs text-glass-text opacity-80 line-clamp-2 font-light">{t.body}</p>
-                    {t.variableCount! > 0 && (
-                        <div className="mt-2 flex items-center gap-1">
-                            <span className="text-[10px] text-pink-400 bg-pink-500/10 px-1.5 py-0.5 rounded border border-pink-500/20">
-                                {t.variableCount} Variables
-                            </span>
+                allTemplates.map((t) => {
+                    const header = getHeaderComponent(t);
+                    return (
+                        <div 
+                        key={t.id || t.name}
+                        onClick={() => handleSelect(t)}
+                        className="p-4 rounded-xl border border-glass-border bg-black/20 hover:bg-white/5 cursor-pointer transition-all duration-300 group hover:border-glass-highlight hover:scale-[0.99]"
+                        >
+                        <div className="flex justify-between items-start mb-1">
+                            <h3 className="font-bold text-sm text-white group-hover:text-nebula-glow transition-colors">{t.name}</h3>
+                            <span className="text-[10px] px-2 py-0.5 rounded bg-white/5 text-glass-muted">{t.language}</span>
                         </div>
-                    )}
-                    </div>
-                ))
+                        <p className="text-xs text-glass-text opacity-80 line-clamp-2 font-light">{t.body}</p>
+                        <div className="mt-2 flex items-center gap-2">
+                            {t.variableCount! > 0 && (
+                                <span className="text-[10px] text-pink-400 bg-pink-500/10 px-1.5 py-0.5 rounded border border-pink-500/20">
+                                    {t.variableCount} Vars
+                                </span>
+                            )}
+                            {header && header.format && header.format !== 'TEXT' && (
+                                <span className="text-[10px] text-blue-400 bg-blue-500/10 px-1.5 py-0.5 rounded border border-blue-500/20 flex items-center gap-1">
+                                    {header.format === 'IMAGE' ? <ImageIcon size={10}/> : header.format === 'VIDEO' ? <Video size={10}/> : <FileText size={10}/>}
+                                    {header.format} Header
+                                </span>
+                            )}
+                        </div>
+                        </div>
+                    );
+                })
             )}
             </div>
         </>
