@@ -1,0 +1,8 @@
+{
+  "name": "WhatsBiz Connect",
+  "description": "A WhatsApp Business API client wrapper that allows sending messages via Meta Graph API and simulates incoming customer responses using Gemini AI.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
